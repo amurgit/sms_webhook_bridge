@@ -11,10 +11,13 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import ru.dxtool.sms_bridge.util.Constants
 import ru.dxtool.sms_bridge.util.LogManager
 
@@ -72,33 +75,48 @@ class LoggingService : Service() {
     }
 
     private fun handleIncomingSms(sender: String, message: String, webhookUrl: String) {
-        val json = """
-            {
-                "sender": "$sender",
-                "message": "$message"
+        // Import these at the top of your file
+        // import org.json.JSONObject
+        // import okhttp3.MediaType.Companion.toMediaType
+        // import okhttp3.RequestBody.Companion.toRequestBody
+
+        try {
+            // Keep your original structure
+            val jsonObject = JSONObject().apply {
+                put("sender", sender)
+                put("message", message)
             }
-        """.trimIndent()
 
-        CoroutineScope(Dispatchers.IO).launch {
-            val body = RequestBody.create("application/json".toMediaTypeOrNull(), json)
-            val request = Request.Builder()
-                .url(webhookUrl)
-                .post(body)
-                .build()
+            val jsonString = jsonObject.toString()
+            Log.d("LoggingService", "Sending JSON: $jsonString") // Debug log
 
-            try {
-                LogManager.addLog("Sending to webhook: $webhookUrl")
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    LogManager.addLog("Webhook success: HTTP ${response.code}")
-                } else {
-                    LogManager.addLog("Webhook failed: HTTP ${response.code}")
+            CoroutineScope(Dispatchers.IO).launch {
+                // Modern syntax, replacing the deprecated create() method
+                val body = jsonString.toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url(webhookUrl)
+                    .post(body)
+                    .build()
+
+                try {
+                    LogManager.addLog("Sending to webhook: $webhookUrl")
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string() ?: "No response body"
+
+                    if (response.isSuccessful) {
+                        LogManager.addLog("Webhook success: HTTP ${response.code}")
+                    } else {
+                        LogManager.addLog("Webhook failed: HTTP ${response.code}")
+                    }
+                    Log.i("LoggingService", "Webhook response: $responseBody")
+                } catch (e: Exception) {
+                    LogManager.addLog("Webhook error: ${e.message}")
+                    Log.e("LoggingService", "Error sending webhook request", e)
                 }
-                Log.i("LoggingService", "Webhook response: ${response.body?.string()}")
-            } catch (e: Exception) {
-                LogManager.addLog("Webhook error: ${e.message}")
-                Log.e("LoggingService", "Error sending webhook request", e)
             }
+        } catch (e: Exception) {
+            LogManager.addLog("Error creating JSON: ${e.message}")
+            Log.e("LoggingService", "Error creating JSON payload", e)
         }
     }
 
